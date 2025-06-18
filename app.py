@@ -112,11 +112,22 @@ def render_main_page():
         with cols[(i-1) % 3]:
             if st.button(f"{i}단원", use_container_width=True):
                 go_to_word_list(i)
+                st.rerun()
 
     st.write("---")
     st.subheader("🎓 도전! 단어 퀴즈")
     if st.button("퀴즈 시작하기", type="primary", use_container_width=True):
         go_to_quiz()
+        st.rerun()
+    
+    st.write("---")
+    st.markdown(
+        "<div style='text-align: center; color: grey; font-size: 0.9em;'>"
+        "개발자: 약산초등학교 교사 김정현 (teachjunghyun@gmail.com)"
+        "</div>",
+        unsafe_allow_html=True
+    )
+
 
 def render_word_list_page():
     """단어장 페이지를 화면에 표시합니다."""
@@ -129,6 +140,7 @@ def render_word_list_page():
 
     if st.button("메인으로 돌아가기"):
         go_to_main()
+        st.rerun()
 
 def handle_answer(selected_option):
     """퀴즈 답변을 처리합니다."""
@@ -152,10 +164,17 @@ def render_quiz_page():
         st.warning("퀴즈를 시작하려면 메인 페이지로 돌아가세요.")
         if st.button("메인으로 돌아가기"):
             go_to_main()
+            st.rerun()
         return
 
     q_idx = st.session_state.current_question
     
+    # 퀴즈가 끝났는지 확인 (마지막 문제 답변 후)
+    if q_idx >= len(st.session_state.quiz_questions):
+        st.session_state.page = 'results'
+        st.rerun()
+        return
+
     st.title("🎓 도전! 단어 퀴즈")
     st.progress((q_idx + 1) / len(st.session_state.quiz_questions), text=f"문제 {q_idx + 1}/10")
 
@@ -169,8 +188,10 @@ def render_quiz_page():
     
     for i, option in enumerate(options):
         with cols[i]:
-            if st.button(option, key=f"q{q_idx}_opt{i}", use_container_width=True, on_click=handle_answer, args=(option,)):
-                pass
+            # on_click 콜백 대신, 버튼 클릭 시 직접 함수를 호출하고 스크립트를 재실행합니다.
+            if st.button(option, key=f"q{q_idx}_opt{i}", use_container_width=True):
+                handle_answer(option)
+                st.rerun() # 즉시 스크립트를 다시 실행하여 다음 문제나 결과 페이지를 보여줍니다.
 
 
 def render_results_page():
@@ -192,6 +213,7 @@ def render_results_page():
 
     if st.button("메인으로 돌아가기", type="primary"):
         go_to_main()
+        st.rerun()
 
 # -------------------- 메인 로직 --------------------
 # 현재 페이지 상태에 따라 적절한 함수를 호출합니다.
