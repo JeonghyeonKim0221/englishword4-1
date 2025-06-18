@@ -1,5 +1,7 @@
 import streamlit as st
 import random
+import pandas as pd
+import time
 
 # -------------------- 데이터 --------------------
 # 각 단원별 단어와 뜻을 딕셔너리 형태로 저장합니다.
@@ -53,14 +55,21 @@ if 'current_question' not in st.session_state:
     st.session_state.current_question = 0
 if 'score' not in st.session_state:
     st.session_state.score = 0
+# 암기 학습을 위한 상태 추가
+if 'memorize_index' not in st.session_state:
+    st.session_state.memorize_index = 0
+if 'memorize_stage' not in st.session_state:
+    st.session_state.memorize_stage = 'show_word'
 
 # -------------------- 페이지 이동 함수 --------------------
 def go_to_main():
-    """메인 페이지로 이동하고 퀴즈 상태를 초기화합니다."""
+    """메인 페이지로 이동하고 퀴즈/암기 상태를 초기화합니다."""
     st.session_state.page = 'main'
     st.session_state.quiz_questions = []
     st.session_state.current_question = 0
     st.session_state.score = 0
+    st.session_state.memorize_index = 0
+    st.session_state.memorize_stage = 'show_word'
 
 def go_to_word_list(lesson):
     """선택한 단원의 단어장 페이지로 이동합니다."""
@@ -73,29 +82,20 @@ def go_to_quiz():
     st.session_state.current_question = 0
     st.session_state.score = 0
     
-    # 퀴즈 문제 10개 생성
     all_word_pairs = []
     for lesson in words.values():
         all_word_pairs.extend(lesson.items())
     
-    # 중복되지 않게 10개의 단어 선택
     random_questions = random.sample(all_word_pairs, 10)
     
     quiz_set = []
     for eng, kor in random_questions:
-        # 정답을 제외한 단어 리스트
         other_words = [w for w in all_words if w != eng]
-        # 오답 2개 랜덤 선택
         wrong_answers = random.sample(other_words, 2)
-        
         options = wrong_answers + [eng]
         random.shuffle(options)
         
-        quiz_set.append({
-            "question": kor,
-            "answer": eng,
-            "options": options
-        })
+        quiz_set.append({"question": kor, "answer": eng, "options": options})
     st.session_state.quiz_questions = quiz_set
 
 # -------------------- 페이지 렌더링 함수 --------------------
@@ -108,7 +108,6 @@ def render_main_page():
 
     cols = st.columns(3)
     for i in range(1, 7):
-        # 3열로 버튼 배치
         with cols[(i-1) % 3]:
             if st.button(f"{i}단원", use_container_width=True):
                 go_to_word_list(i)
@@ -128,17 +127,69 @@ def render_main_page():
         unsafe_allow_html=True
     )
 
-
 def render_word_list_page():
     """단어장 페이지를 화면에 표시합니다."""
     lesson = st.session_state.lesson_number
     st.title(f"📖 {lesson}단원 단어장")
 
-    # 단어와 뜻을 표 형태로 표시
     word_data = words[lesson]
-    st.table(word_data)
+    # Pandas DataFrame을 사용하여 '단어', '뜻' 헤더를 가진 표를 생성
+    df = pd.DataFrame(list(word_data.items()), columns=['단어', '뜻'])
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
-    if st.button("메인으로 돌아가기"):
+    if st.button("🧠 암기 학습 시작하기", type="primary", use_container_width=True):
+        st.session_state.page = 'memorize'
+        st.session_state.memorize_index = 0
+        st.session_state.memorize_stage = 'show_word'
+        st.rerun()
+
+    if st.button("메인으로 돌아가기", use_container_width=True):
+        go_to_main()
+        st.rerun()
+
+def render_memorize_page():
+    """암기 학습 페이지를 렌더링합니다."""
+    lesson_num = st.session_state.lesson_number
+    st.title(f"🧠 {lesson_num}단원 암기 학습")
+
+    lesson_words = list(words[lesson_num].items())
+    memorize_idx = st.session_state.memorize_index
+
+    # 모든 단어 학습을 완료했는지 확인
+    if memorize_idx >= len(lesson_words):
+        st.success("모든 단어 학습을 완료했습니다! 참 잘했어요! 👍")
+        st.balloons()
+        if st.button("메인으로 돌아가기", use_container_width=True):
+            go_to_main()
+            st.rerun()
+        return
+
+    eng_word, kor_meaning = lesson_words[memorize_idx]
+    stage = st.session_state.memorize_stage
+
+    # 단어와 뜻을 표시할 영역
+    placeholder = st.empty()
+    with placeholder.container():
+        st.markdown(f"<div style='text-align: center; font-size: 2.5em; font-weight: bold;'>{eng_word}</div>", unsafe_allow_html=True)
+        if stage == 'show_meaning':
+            st.markdown(f"<div style='text-align: center; font-size: 1.5em; color: grey; margin-top: 10px;'>{kor_meaning}</div>", unsafe_allow_html=True)
+        else:
+            # 뜻이 보이지 않을 때 공간을 차지하도록 하여 UI가 흔들리지 않게 함
+            st.markdown("<div style='height: 2.5em;'></div>", unsafe_allow_html=True)
+
+    # 상태 변경 및 자동 새로고침 로직
+    if stage == 'show_word':
+        st.session_state.memorize_stage = 'show_meaning'
+        # meta 태그를 이용해 5초 후 페이지를 새로고침
+        st.markdown('<meta http-equiv="refresh" content="5">', unsafe_allow_html=True)
+    elif stage == 'show_meaning':
+        st.session_state.memorize_stage = 'show_word'
+        st.session_state.memorize_index += 1
+        # meta 태그를 이용해 3초 후 페이지를 새로고침
+        st.markdown('<meta http-equiv="refresh" content="3">', unsafe_allow_html=True)
+
+    st.write("---")
+    if st.button("메인으로 돌아가기", use_container_width=True):
         go_to_main()
         st.rerun()
 
@@ -152,11 +203,9 @@ def handle_answer(selected_option):
     else:
         st.toast(f"아쉬워요! 정답은 '{question_data['answer']}'였어요.", icon="❌")
 
-    # 다음 문제로 이동
     st.session_state.current_question += 1
     if st.session_state.current_question >= len(st.session_state.quiz_questions):
         st.session_state.page = 'results'
-
 
 def render_quiz_page():
     """퀴즈 페이지를 화면에 표시합니다."""
@@ -169,7 +218,6 @@ def render_quiz_page():
 
     q_idx = st.session_state.current_question
     
-    # 퀴즈가 끝났는지 확인 (마지막 문제 답변 후)
     if q_idx >= len(st.session_state.quiz_questions):
         st.session_state.page = 'results'
         st.rerun()
@@ -188,11 +236,9 @@ def render_quiz_page():
     
     for i, option in enumerate(options):
         with cols[i]:
-            # on_click 콜백 대신, 버튼 클릭 시 직접 함수를 호출하고 스크립트를 재실행합니다.
             if st.button(option, key=f"q{q_idx}_opt{i}", use_container_width=True):
                 handle_answer(option)
-                st.rerun() # 즉시 스크립트를 다시 실행하여 다음 문제나 결과 페이지를 보여줍니다.
-
+                st.rerun()
 
 def render_results_page():
     """퀴즈 결과 페이지를 화면에 표시합니다."""
@@ -202,7 +248,6 @@ def render_results_page():
     st.title("✨ 퀴즈 결과 ✨")
     st.header(f"총 {total}문제 중 {score}개를 맞혔어요!")
 
-    # 격려 메시지
     if score == total:
         st.success("와, 대단해요! 모든 문제를 맞혔네요! 🥳")
         st.balloons()
@@ -221,6 +266,8 @@ if st.session_state.page == 'main':
     render_main_page()
 elif st.session_state.page == 'word_list':
     render_word_list_page()
+elif st.session_state.page == 'memorize':
+    render_memorize_page()
 elif st.session_state.page == 'quiz':
     render_quiz_page()
 elif st.session_state.page == 'results':
