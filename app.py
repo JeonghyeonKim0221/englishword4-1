@@ -227,8 +227,10 @@ def render_memorize_page():
                 }}
                 
                 const [eng, kor] = words[currentIndex];
-
-                progressText.innerText = `단어 ${currentIndex + 1}/${words.length}`;
+                
+                // *** 오류 수정된 부분 ***
+                // 자바스크립트의 템플릿 리터럴(``) 대신 일반 문자열 연결(+)을 사용하여 파이썬 f-string과의 충돌을 피합니다.
+                progressText.innerText = '단어 ' + (currentIndex + 1) + '/' + words.length;
                 progressBar.value = currentIndex;
 
                 engWordEl.innerText = eng;
