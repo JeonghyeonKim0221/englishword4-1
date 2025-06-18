@@ -2,6 +2,8 @@ import streamlit as st
 import random
 import pandas as pd
 import time
+import json
+import urllib.parse
 
 # -------------------- 데이터 --------------------
 # 각 단원별 단어와 뜻을 딕셔너리 형태로 저장합니다.
@@ -47,6 +49,14 @@ for lesson_words in words.values():
 # session_state를 초기화합니다.
 if 'page' not in st.session_state:
     st.session_state.page = 'main'
+# URL 파라미터를 통해 페이지 상태를 복구 (새로고침 대응)
+try:
+    if 'page' in st.query_params and 'navigated' not in st.session_state:
+        st.session_state.page = st.query_params['page']
+        st.session_state.navigated = True # 중복 실행 방지
+except:
+    st.session_state.page = 'main'
+
 if 'lesson_number' not in st.session_state:
     st.session_state.lesson_number = 0
 if 'quiz_questions' not in st.session_state:
@@ -60,16 +70,23 @@ if 'memorize_index' not in st.session_state:
     st.session_state.memorize_index = 0
 if 'memorize_stage' not in st.session_state:
     st.session_state.memorize_stage = 'show_word'
+if 'memorized_words' not in st.session_state:
+    st.session_state.memorized_words = []
+
 
 # -------------------- 페이지 이동 함수 --------------------
 def go_to_main():
-    """메인 페이지로 이동하고 퀴즈/암기 상태를 초기화합니다."""
+    """메인 페이지로 이동하고 모든 상태를 초기화합니다."""
     st.session_state.page = 'main'
     st.session_state.quiz_questions = []
     st.session_state.current_question = 0
     st.session_state.score = 0
     st.session_state.memorize_index = 0
     st.session_state.memorize_stage = 'show_word'
+    st.session_state.memorized_words = []
+    if 'navigated' in st.session_state:
+        del st.session_state['navigated']
+
 
 def go_to_word_list(lesson):
     """선택한 단원의 단어장 페이지로 이동합니다."""
@@ -133,12 +150,15 @@ def render_word_list_page():
     st.title(f"📖 {lesson}단원 단어장")
 
     word_data = words[lesson]
-    # Pandas DataFrame을 사용하여 '단어', '뜻' 헤더를 가진 표를 생성
     df = pd.DataFrame(list(word_data.items()), columns=['단어', '뜻'])
     st.dataframe(df, use_container_width=True, hide_index=True)
 
     if st.button("🧠 암기 학습 시작하기", type="primary", use_container_width=True):
         st.session_state.page = 'memorize'
+        # 단어 리스트를 무작위로 섞어서 세션에 저장
+        lesson_words = list(words[st.session_state.lesson_number].items())
+        random.shuffle(lesson_words)
+        st.session_state.memorized_words = lesson_words
         st.session_state.memorize_index = 0
         st.session_state.memorize_stage = 'show_word'
         st.rerun()
@@ -148,18 +168,34 @@ def render_word_list_page():
         st.rerun()
 
 def render_memorize_page():
-    """암기 학습 페이지를 렌더링합니다."""
+    """암기 학습 페이지를 렌더링합니다. URL query parameter를 이용해 상태를 유지합니다."""
+    # 페이지 새로고침 시 URL 파라미터로 상태 복구
+    if not st.session_state.memorized_words:
+        try:
+            params = st.query_params
+            st.session_state.lesson_number = int(params.get('lesson'))
+            st.session_state.memorize_index = int(params.get('index'))
+            st.session_state.memorize_stage = params.get('stage')
+            decoded_words = urllib.parse.unquote(params.get('words'))
+            st.session_state.memorized_words = json.loads(decoded_words)
+        except (json.JSONDecodeError, TypeError, ValueError, AttributeError, KeyError):
+            st.warning("학습 세션이 만료되었습니다. 메인 화면으로 돌아갑니다.")
+            if st.button("메인으로 돌아가기", use_container_width=True):
+                go_to_main()
+                st.rerun()
+            return
+    
     lesson_num = st.session_state.lesson_number
     st.title(f"🧠 {lesson_num}단원 암기 학습")
 
-    lesson_words = list(words[lesson_num].items())
+    lesson_words = st.session_state.memorized_words
     memorize_idx = st.session_state.memorize_index
 
-    # 모든 단어 학습을 완료했는지 확인
+    # 모든 단어 학습 완료
     if memorize_idx >= len(lesson_words):
         st.success("모든 단어 학습을 완료했습니다! 참 잘했어요! 👍")
         st.balloons()
-        if st.button("메인으로 돌아가기", use_container_width=True):
+        if st.button("메인으로 돌아가기", use_container_width=True, type="primary"):
             go_to_main()
             st.rerun()
         return
@@ -167,29 +203,30 @@ def render_memorize_page():
     eng_word, kor_meaning = lesson_words[memorize_idx]
     stage = st.session_state.memorize_stage
 
-    # 단어와 뜻을 표시할 영역
+    # 단어/뜻 표시
     placeholder = st.empty()
     with placeholder.container():
-        st.markdown(f"<div style='text-align: center; font-size: 2.5em; font-weight: bold;'>{eng_word}</div>", unsafe_allow_html=True)
+        st.markdown(f"<h1 style='text-align: center; font-size: 3em; font-weight: bold; padding: 20px 0;'>{eng_word}</h1>", unsafe_allow_html=True)
         if stage == 'show_meaning':
-            st.markdown(f"<div style='text-align: center; font-size: 1.5em; color: grey; margin-top: 10px;'>{kor_meaning}</div>", unsafe_allow_html=True)
+            st.markdown(f"<h2 style='text-align: center; font-size: 2em; color: grey; margin-top: 10px;'>{kor_meaning}</h2>", unsafe_allow_html=True)
         else:
-            # 뜻이 보이지 않을 때 공간을 차지하도록 하여 UI가 흔들리지 않게 함
-            st.markdown("<div style='height: 2.5em;'></div>", unsafe_allow_html=True)
+            st.markdown("<div style='height: 3.5em;'></div>", unsafe_allow_html=True)
 
-    # 상태 변경 및 자동 새로고침 로직
-    if stage == 'show_word':
-        st.session_state.memorize_stage = 'show_meaning'
-        # meta 태그를 이용해 5초 후 페이지를 새로고침
-        st.markdown('<meta http-equiv="refresh" content="5">', unsafe_allow_html=True)
-    elif stage == 'show_meaning':
-        st.session_state.memorize_stage = 'show_word'
-        st.session_state.memorize_index += 1
-        # meta 태그를 이용해 3초 후 페이지를 새로고침
-        st.markdown('<meta http-equiv="refresh" content="3">', unsafe_allow_html=True)
+    # 다음 상태 준비 및 새로고침 URL 생성
+    next_stage, next_index, delay = ('show_meaning', memorize_idx, 5) if stage == 'show_word' else ('show_word', memorize_idx + 1, 3)
+
+    # URL에 상태 인코딩
+    words_json = json.dumps(lesson_words)
+    words_encoded = urllib.parse.quote(words_json)
+    
+    refresh_url = f"/?page=memorize&lesson={lesson_num}&index={next_index}&stage={next_stage}&words={words_encoded}"
+    
+    st.markdown(f'<meta http-equiv="refresh" content="{delay};url={refresh_url}">', unsafe_allow_html=True)
 
     st.write("---")
-    if st.button("메인으로 돌아가기", use_container_width=True):
+    st.progress((memorize_idx) / len(lesson_words), text=f"단어 {memorize_idx + 1}/{len(lesson_words)}")
+
+    if st.button("학습 중단하고 메인으로", use_container_width=True):
         go_to_main()
         st.rerun()
 
@@ -272,3 +309,8 @@ elif st.session_state.page == 'quiz':
     render_quiz_page()
 elif st.session_state.page == 'results':
     render_results_page()
+else:
+    # 예외 처리: 알 수 없는 페이지일 경우 메인으로
+    go_to_main()
+    st.rerun()
+
