@@ -3,7 +3,7 @@ import random
 import pandas as pd
 import time
 import json
-import urllib.parse
+import streamlit.components.v1 as components
 
 # -------------------- 데이터 --------------------
 # 각 단원별 단어와 뜻을 딕셔너리 형태로 저장합니다.
@@ -49,14 +49,6 @@ for lesson_words in words.values():
 # session_state를 초기화합니다.
 if 'page' not in st.session_state:
     st.session_state.page = 'main'
-# URL 파라미터를 통해 페이지 상태를 복구 (새로고침 대응)
-try:
-    if 'page' in st.query_params and 'navigated' not in st.session_state:
-        st.session_state.page = st.query_params['page']
-        st.session_state.navigated = True # 중복 실행 방지
-except:
-    st.session_state.page = 'main'
-
 if 'lesson_number' not in st.session_state:
     st.session_state.lesson_number = 0
 if 'quiz_questions' not in st.session_state:
@@ -66,10 +58,6 @@ if 'current_question' not in st.session_state:
 if 'score' not in st.session_state:
     st.session_state.score = 0
 # 암기 학습을 위한 상태 추가
-if 'memorize_index' not in st.session_state:
-    st.session_state.memorize_index = 0
-if 'memorize_stage' not in st.session_state:
-    st.session_state.memorize_stage = 'show_word'
 if 'memorized_words' not in st.session_state:
     st.session_state.memorized_words = []
 
@@ -81,11 +69,7 @@ def go_to_main():
     st.session_state.quiz_questions = []
     st.session_state.current_question = 0
     st.session_state.score = 0
-    st.session_state.memorize_index = 0
-    st.session_state.memorize_stage = 'show_word'
     st.session_state.memorized_words = []
-    if 'navigated' in st.session_state:
-        del st.session_state['navigated']
 
 
 def go_to_word_list(lesson):
@@ -159,8 +143,6 @@ def render_word_list_page():
         lesson_words = list(words[st.session_state.lesson_number].items())
         random.shuffle(lesson_words)
         st.session_state.memorized_words = lesson_words
-        st.session_state.memorize_index = 0
-        st.session_state.memorize_stage = 'show_word'
         st.rerun()
 
     if st.button("메인으로 돌아가기", use_container_width=True):
@@ -168,67 +150,115 @@ def render_word_list_page():
         st.rerun()
 
 def render_memorize_page():
-    """암기 학습 페이지를 렌더링합니다. URL query parameter를 이용해 상태를 유지합니다."""
-    # 페이지 새로고침 시 URL 파라미터로 상태 복구
-    if not st.session_state.memorized_words:
-        try:
-            params = st.query_params
-            st.session_state.lesson_number = int(params.get('lesson'))
-            st.session_state.memorize_index = int(params.get('index'))
-            st.session_state.memorize_stage = params.get('stage')
-            decoded_words = urllib.parse.unquote(params.get('words'))
-            st.session_state.memorized_words = json.loads(decoded_words)
-        except (json.JSONDecodeError, TypeError, ValueError, AttributeError, KeyError):
-            st.warning("학습 세션이 만료되었습니다. 메인 화면으로 돌아갑니다.")
-            if st.button("메인으로 돌아가기", use_container_width=True):
-                go_to_main()
-                st.rerun()
-            return
-    
+    """암기 학습 페이지를 렌더링합니다. 페이지 리로드 없이 클라이언트 측에서 동작합니다."""
     lesson_num = st.session_state.lesson_number
     st.title(f"🧠 {lesson_num}단원 암기 학습")
 
-    lesson_words = st.session_state.memorized_words
-    memorize_idx = st.session_state.memorize_index
+    lesson_words = st.session_state.get('memorized_words', [])
 
-    # 모든 단어 학습 완료
-    if memorize_idx >= len(lesson_words):
-        st.success("모든 단어 학습을 완료했습니다! 참 잘했어요! 👍")
-        st.balloons()
-        if st.button("메인으로 돌아가기", use_container_width=True, type="primary"):
+    if not lesson_words:
+        st.warning("학습할 단어가 없습니다. 메인 페이지로 돌아가 다시 시작해주세요.")
+        if st.button("메인으로 돌아가기", use_container_width=True):
             go_to_main()
             st.rerun()
         return
 
-    eng_word, kor_meaning = lesson_words[memorize_idx]
-    stage = st.session_state.memorize_stage
-
-    # 단어/뜻 표시
-    placeholder = st.empty()
-    with placeholder.container():
-        st.markdown(f"<h1 style='text-align: center; font-size: 3em; font-weight: bold; padding: 20px 0;'>{eng_word}</h1>", unsafe_allow_html=True)
-        if stage == 'show_meaning':
-            st.markdown(f"<h2 style='text-align: center; font-size: 2em; color: grey; margin-top: 10px;'>{kor_meaning}</h2>", unsafe_allow_html=True)
-        else:
-            st.markdown("<div style='height: 3.5em;'></div>", unsafe_allow_html=True)
-
-    # 다음 상태 준비 및 새로고침 URL 생성
-    next_stage, next_index, delay = ('show_meaning', memorize_idx, 5) if stage == 'show_word' else ('show_word', memorize_idx + 1, 3)
-
-    # URL에 상태 인코딩
     words_json = json.dumps(lesson_words)
-    words_encoded = urllib.parse.quote(words_json)
-    
-    refresh_url = f"/?page=memorize&lesson={lesson_num}&index={next_index}&stage={next_stage}&words={words_encoded}"
-    
-    st.markdown(f'<meta http-equiv="refresh" content="{delay};url={refresh_url}">', unsafe_allow_html=True)
+
+    html_template = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <style>
+        body {{ font-family: sans-serif; }}
+        #container {{
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }}
+        #word-container {{ text-align: center; }}
+        #eng-word {{
+            font-size: 3em;
+            font-weight: bold;
+            height: 1.5em; /* 내용 변경 시 레이아웃 흔들림 방지 */
+            line-height: 1.5em;
+            margin: 20px 0;
+        }}
+        #kor-meaning {{
+            font-size: 2em;
+            color: grey;
+            height: 1.5em; /* 내용 변경 시 레이아웃 흔들림 방지 */
+            line-height: 1.5em;
+        }}
+        #progress-container {{ width: 100%; text-align: center; margin-top: 20px; }}
+        progress {{ width: 80%; }}
+    </style>
+    </head>
+    <body>
+        <div id="container">
+            <div id="word-container">
+                <h1 id="eng-word"></h1>
+                <h2 id="kor-meaning"></h2>
+            </div>
+            <div id="progress-container">
+                 <p id="progress-text"></p>
+                 <progress id="progressBar" value="0"></progress>
+            </div>
+        </div>
+
+        <script>
+            const words = {words_json};
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progress-text');
+            const engWordEl = document.getElementById('eng-word');
+            const korMeaningEl = document.getElementById('kor-meaning');
+            let currentIndex = 0;
+
+            progressBar.max = words.length;
+
+            function showNext() {{
+                if (currentIndex >= words.length) {{
+                    engWordEl.innerText = "✨ 학습 완료! ✨";
+                    korMeaningEl.innerHTML = "참 잘했어요! 👍";
+                    progressText.innerText = "모든 단어를 다 외웠어요!";
+                    progressBar.value = words.length;
+                    return;
+                }}
+                
+                const [eng, kor] = words[currentIndex];
+
+                progressText.innerText = `단어 ${currentIndex + 1}/${words.length}`;
+                progressBar.value = currentIndex;
+
+                engWordEl.innerText = eng;
+                korMeaningEl.innerText = "";
+
+                setTimeout(() => {{
+                    korMeaningEl.innerText = kor;
+                    progressBar.value = currentIndex + 1;
+                    
+                    setTimeout(() => {{
+                        currentIndex++;
+                        showNext();
+                    }}, 3000);
+
+                }}, 5000);
+            }}
+
+            showNext();
+        </script>
+    </body>
+    </html>
+    """
+    components.html(html_template, height=350, scrolling=False)
 
     st.write("---")
-    st.progress((memorize_idx) / len(lesson_words), text=f"단어 {memorize_idx + 1}/{len(lesson_words)}")
-
     if st.button("학습 중단하고 메인으로", use_container_width=True):
-        go_to_main()
+        # 직접 go_to_main()을 호출하는 대신, 상태를 변경하여 메인 로직에서 처리하도록 함
+        st.session_state.page = "main_redirect"
         st.rerun()
+
 
 def handle_answer(selected_option):
     """퀴즈 답변을 처리합니다."""
@@ -309,8 +339,11 @@ elif st.session_state.page == 'quiz':
     render_quiz_page()
 elif st.session_state.page == 'results':
     render_results_page()
-else:
-    # 예외 처리: 알 수 없는 페이지일 경우 메인으로
+elif st.session_state.page == "main_redirect":
+    # '학습 중단' 버튼을 위한 중간 단계. 상태를 완전히 초기화하고 메인으로 이동합니다.
     go_to_main()
     st.rerun()
-
+else:
+    # 예외 처리: 알 수 없는 페이지일 경우 메인으로 강제 이동
+    go_to_main()
+    st.rerun()
